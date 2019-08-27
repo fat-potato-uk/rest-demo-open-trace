@@ -12,16 +12,22 @@ public class GenericManager {
 
     public void embeddedSpan(String name) throws InterruptedException {
         // A span within the span.
-        try (var ignored = tracer.buildSpan("embedded span").withTag("name", name).startActive(true)) {
+        var span = tracer.buildSpan("embedded span").withTag("name", name).start();
+        try (var ignored = tracer.activateSpan(span)) {
             randomFunction("function one");
             randomFunction("function two");
             randomFunction("function three");
+        } finally {
+            span.finish();
         }
     }
 
     private void randomFunction(String name) throws InterruptedException {
-        try(var ignored = tracer.buildSpan(name).startActive(true)) {
+        var span = tracer.buildSpan(name).start();
+        try (var ignored = tracer.activateSpan(span)) {
             Thread.sleep((long) (Math.random() * 1000));
+        } finally {
+            span.finish();
         }
     }
 }
