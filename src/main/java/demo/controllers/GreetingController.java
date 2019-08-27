@@ -3,17 +3,17 @@ package demo.controllers;
 
 import demo.managers.GenericManager;
 import demo.models.Greeting;
-import io.opentracing.Scope;
-import io.opentracing.Span;
+import demo.repositories.GreetingRepository;
 import io.opentracing.Tracer;
 import io.opentracing.log.Fields;
 import io.opentracing.tag.Tags;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -25,43 +25,65 @@ public class GreetingController {
     private final AtomicLong counter = new AtomicLong();
 
     @Autowired
-    GenericManager manager;
+    private GenericManager manager;
 
     @Autowired
-    Tracer tracer;
+    private Tracer tracer;
 
-    @RequestMapping("/greeting")
-    public Greeting greeting(@RequestParam(value="name", defaultValue="World") String name) throws InterruptedException {
-        manager.embeddedSpan(name);
-        // Propagate all baggage.
-        tracer.activeSpan().context().baggageItems().forEach(i -> tracer.activeSpan().setBaggageItem(i.getKey(), i.getValue()));
+    @Autowired
+    private GreetingRepository greetingRepository;
+
+    @GetMapping("/greeting")
+    Greeting greeting(@RequestParam(value="name", defaultValue="World") String name) throws InterruptedException {
+        getBaggageAndSetName("/greeting");
+
         // Can tag the current span
         tracer.activeSpan().setTag("previous-count", counter.get());
         return new Greeting(counter.incrementAndGet(), String.format(template, name));
     }
 
-    @RequestMapping("/errorgreeting")
-    public Greeting errorGreeeting(@RequestParam(value="name", defaultValue="World") String name,
-                                   @RequestParam(value="throw", required = false, defaultValue="true") Boolean doThrow) throws Exception {
-        if(doThrow) {
-            throw new Exception("bad times");
-        }
-        return greeting(name);
+    @GetMapping("/greeting/embedded")
+    Greeting embeddedGreeting(@RequestParam(value="name", defaultValue="World") String name) throws InterruptedException {
+        getBaggageAndSetName("/greeting/embedded");
 
+        // Run a function that creates span within this span
+        manager.embeddedSpan(name);
+
+        return new Greeting(counter.incrementAndGet(), String.format(template, name));
     }
 
-    @RequestMapping("/generalerror")
-    public Greeting manual(@RequestParam(value="name", defaultValue="World") String name) throws Exception {
-        error();
-        return greeting(name);
+    @GetMapping("/greeting/save")
+    Greeting saveGreeting(@RequestParam(value="name", defaultValue="World") String name) {
+        getBaggageAndSetName("/greeting/save");
+        return greetingRepository.save(new Greeting(counter.incrementAndGet(), String.format(template, name)));
     }
 
-    private void error() {
-        Scope scope = tracer.scopeManager().active();
-        if (scope != null) {
-            Span span = scope.span();
-            Tags.ERROR.set(span, true);
-            span.log(Map.of(Fields.EVENT, "error", Fields.MESSAGE, "Totally borked mate"));
-        }
+    @GetMapping("/greeting/all")
+    List<Greeting> allGreetings() {
+        getBaggageAndSetName("/greeting/all");
+        return greetingRepository.findAll();
+    }
+
+    @GetMapping("/greeting/throw")
+    Greeting throwGreeting() {
+        getBaggageAndSetName("/greeting/throw");
+        throw new RuntimeException("Something went catastrophically wrong");
+    }
+
+    @GetMapping("/greeting/error")
+    Greeting errorGreeting(@RequestParam(value="name", defaultValue="World") String name) throws Exception {
+        getBaggageAndSetName("/greeting/error");
+        Tags.ERROR.set(tracer.activeSpan(), true);
+        tracer.activeSpan().log(Map.of(Fields.EVENT, "error", Fields.MESSAGE, "Something went a bit, but not catastrophically wrong"));
+        return new Greeting(counter.incrementAndGet(), String.format(template, name));
+    }
+
+    private void getBaggageAndSetName(String name) {
+        tracer.activeSpan().setOperationName(name);
+
+        // Propagate all baggage.
+        var baggageItems = tracer.activeSpan().context().baggageItems();
+        log.info("Our baggage: {}", baggageItems);
+        baggageItems.forEach(i -> tracer.activeSpan().setBaggageItem(i.getKey(), i.getValue()));
     }
 }

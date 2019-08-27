@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 public class GenericManager {
 
     @Autowired
-    Tracer tracer;
+    private Tracer tracer;
 
     public void embeddedSpan(String name) throws InterruptedException {
         // A span within the span.
